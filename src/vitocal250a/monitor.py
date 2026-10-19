@@ -53,6 +53,7 @@ def run_monitor() -> None:
     parser.add_argument(
         "--monitor", type=int, help="Monitor heat pump and fetch data every n seconds"
     )
+    parser.add_argument("--quiet", action="store_true", help="Don't output current status")
 
     args = parser.parse_args()
 
@@ -144,17 +145,20 @@ def run_monitor() -> None:
                 csv_file.flush()
 
             # write to stdout
-            width_name = max(len(name) for _, name, _, _, _, _ in data)
-            width_value = max(len(str(value)) + len(unit) for _, _, value, _, _, unit in data)
-            for _, name, value, timestamp, updated, unit in data:
-                print_value = f"{value}{unit}"
-                print_timestamp = _format_timestamp(timestamp, fetch_time)
-                print(
-                    f"{name:<{width_name}}  "
-                    f"{'' if not args.monitor else '[*]  ' if updated else '     '}"
-                    f"{print_value:<{width_value}}  "
-                    f"{print_timestamp:<19}"
+            if not args.quiet:
+                width_name = max(len(name) for _, name, _, _, _, _ in data)
+                width_value = max(
+                    len(str(value)) + len(unit) for _, _, value, _, _, unit in data
                 )
+                for _, name, value, timestamp, updated, unit in data:
+                    print_value = f"{value}{unit}"
+                    print_timestamp = _format_timestamp(timestamp, fetch_time)
+                    print(
+                        f"{name:<{width_name}}  "
+                        f"{'' if not args.monitor else '[*]  ' if updated else '     '}"
+                        f"{print_value:<{width_value}}  "
+                        f"{print_timestamp:<19}"
+                    )
 
             # monitor or finish
             if not args.monitor:
@@ -162,5 +166,7 @@ def run_monitor() -> None:
 
             sleep(args.monitor)
 
-            # clear previous stdout buffer
-            print("\033[F" * len(data), end="")
+            # clear previous stdout buffer,
+            # unless not connected to a tty
+            if not args.quiet and sys.stdout.isatty():
+                print("\033[F" * len(data), end="")
