@@ -12,7 +12,7 @@
 import signal
 from types import FrameType
 
-from .monitor import run_monitor
+from vitocal250a.monitor import run_monitor
 
 
 def monitor() -> None:
@@ -25,3 +25,7 @@ def monitor() -> None:
         run_monitor()
     except KeyboardInterrupt:
         raise SystemExit(130)
+
+
+if __name__ == "__main__":
+    monitor()
