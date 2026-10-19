@@ -1,0 +1,71 @@
+name: Periodically rebuild & publish containers (auto update)
+
+on:
+  schedule:
+    # run once a day at 21:50 UTC
+    - cron: '50 21 * * *'
+
+concurrency: build
+
+env:
+  CI_TOOLS_SETUP: https://raw.githubusercontent.com/SGSGermany/ci-tools/main/setup.sh
+
+defaults:
+  run:
+    shell: bash -eu -o pipefail {0}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      REGISTRY: ghcr.io
+      OWNER: phrozenbyte
+      IMAGE: vitocal250a
+
+    steps:
+      - name: Setup CI tools
+        run: |
+          . <(curl -fsS -L "$CI_TOOLS_SETUP" | bash -s ~/ci-tools)
+          echo "CI_TOOLS=$CI_TOOLS" | tee -a "$GITHUB_ENV"
+          echo "CI_TOOLS_PATH=$CI_TOOLS_PATH" | tee -a "$GITHUB_ENV"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log into container registry ${{ env.REGISTRY }}
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate container image tags
+        run: |
+          TAGS="$("$CI_TOOLS_PATH/containers/generate-image-tags.sh" "$GITHUB_REF" "$GITHUB_RUN_ID.$GITHUB_RUN_NUMBER")"
+          echo "TAGS=$TAGS latest" | tee -a "$GITHUB_ENV"
+
+      - name: Check for updates
+        run: |
+          BUILD_ACTION="$("$CI_TOOLS_PATH/containers/check-for-updates.sh")"
+          echo "BUILD_ACTION=$BUILD_ACTION" | tee -a "$GITHUB_ENV"
+
+      - name: Build container image
+        if: ${{ env.BUILD_ACTION != '' }}
+        run: |
+          buildah unshare ./container/build.sh
+
+      - name: Container image metadata
+        run: |
+          "$CI_TOOLS_PATH/containers/get-metadata.sh" "$REGISTRY/$OWNER" "$IMAGE:latest"
+
+      - name: Push container image
+        if: ${{ env.BUILD_ACTION != '' }}
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ env.IMAGE }}
+          registry: ${{ env.REGISTRY }}/${{ env.OWNER }}
+          tags: ${{ env.TAGS }}
