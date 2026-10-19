@@ -9,3 +9,13 @@ desktop.ini
 # Mac OS X
 .DS_Store
 ._*
+
+# Python
+**/__pycache__
+/src/*.egg-info/
+/build/
+/dist/
+
+# Vitocol 250-A Monitor
+/token.save
+/monitor.csv

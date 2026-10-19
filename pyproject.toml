@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vitocal250a"
+version = "0.0.1"
+requires-python = ">= 3.13"
+dependencies = [
+    "pyvicare",
+    "file_read_backwards",
+]
+
+description = "A very basic management tool for a Viessmann Vitocal 250-A heat pump."
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = [ "LICENSE" ]
+authors = [ {name = "Daniel Rudolf", email = "vitocal250a@daniel-rudolf.de"} ]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Home Automation",
+]
+
+[project.urls]
+Homepage = "https://github.com/PhrozenByte/vitocal250a"
+Repository = "https://github.com/PhrozenByte/vitocal250a.git"
+Issues = "https://github.com/PhrozenByte/vitocal250a/issues"
+
+[project.scripts]
+vitocal250a-monitor = "vitocal250a:monitor"
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy",
+    "types-requests",
+]
+
+[tool.ruff]
+line-length = 96
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 119
+
+[tool.ruff.format]
+line-ending = "lf"
+skip-magic-trailing-comma = true
+
+[tool.mypy]
+strict = true
+files = ["vitocal250a"]
+mypy_path = "stubs"
+
+[[tool.mypy.overrides]]
+module = ["PyViCare.*"]
+follow_untyped_imports = true
