@@ -76,7 +76,7 @@ cmd buildah config \
 cmd buildah config \
     --workingdir "/var/local/vitocal250a" \
     --entrypoint '[ "/entrypoint.sh" ]' \
-    --cmd '[ "vitocal250a-monitor", "--csv", "monitor.csv", "--monitor", "120" ]' \
+    --cmd '[ "vitocal250a-monitor", "--csv", "monitor.csv", "--monitor", "120", "--quiet" ]' \
     "$CONTAINER"
 
 cmd buildah config \
