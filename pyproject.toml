@@ -13,7 +13,7 @@ dependencies = [
 
 description = "A very basic management tool for a Viessmann Vitocal 250-A heat pump."
 readme = "README.md"
-license = "GPL-3.0-only"
+license = "MIT"
 license-files = [ "LICENSE" ]
 authors = [ {name = "Daniel Rudolf", email = "vitocal250a@daniel-rudolf.de"} ]
 
