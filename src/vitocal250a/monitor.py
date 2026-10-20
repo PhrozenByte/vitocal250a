@@ -49,6 +49,7 @@ def run_monitor() -> None:
     # initialize CLI
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--status-file", type=str, help="Status file name")
     parser.add_argument("--csv-file", type=str, help="CSV file name")
     parser.add_argument(
         "--monitor", type=int, help="Monitor heat pump and fetch data every n seconds"
@@ -57,12 +58,21 @@ def run_monitor() -> None:
 
     args = parser.parse_args()
 
+    if args.quiet and not args.status_file and not args.csv_file:
+        parser.error("--quiet requires passing either --status-file or --csv-file")
+
     # initialize PyViCare
     vicare, service, heatpump = init_vicare(client_id, token_file)
 
     # build features
     features = {feature.key: feature for feature in get_features(heatpump)}
     feature_keys = list(features.keys())
+
+    # initialize status file
+    status_file_context: AbstractContextManager[TextIO | None] = nullcontext()
+    if args.status_file:
+        status_file_path = Path(args.status_file)
+        status_file_context = status_file_path.open("w", newline="", encoding="utf-8")
 
     # initialize CSV file
     csv_writer: DictWriter[str] | None = None
@@ -106,67 +116,79 @@ def run_monitor() -> None:
                             features[key].last_timestamp = fetch_time
                             init_features.remove(key)
 
-    with csv_file_context as csv_file:
-        if csv_file is not None:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=feature_keys, delimiter=";")
+    # fetch API and write status
+    with status_file_context as status_file:
+        with csv_file_context as csv_file:
+            if csv_file is not None:
+                csv_writer = csv.DictWriter(csv_file, fieldnames=feature_keys, delimiter=";")
 
-        while True:
-            # manually refresh cache
-            service.clear_cache()  # type: ignore[no-untyped-call]
-            service.fetch_all_features(heatpump.accessor)
-            fetch_time = service.cache_time.astimezone()
+            while True:
+                # manually refresh cache
+                service.clear_cache()  # type: ignore[no-untyped-call]
+                service.fetch_all_features(heatpump.accessor)
+                fetch_time = service.cache_time.astimezone()
 
-            # collect data
-            data: list[tuple[str, str, object, datetime, bool, str]] = [
-                (feature.key, feature.name, *feature.fetch_data(), feature.unit)
-                for feature in features.values()
-            ]
+                # collect data
+                data: list[tuple[str, str, object, datetime, bool, str]] = [
+                    (feature.key, feature.name, *feature.fetch_data(), feature.unit)
+                    for feature in features.values()
+                ]
 
-            # write to CSV file
-            if csv_writer is not None:
-                assert csv_file is not None
+                # write to CSV file
+                if csv_file is not None:
+                    assert csv_writer is not None
 
-                if csv_file_empty:
-                    csv_writer.writeheader()
-                    csv_writer.writerow({key: name for key, name, _, _, _, _ in data})
-                    csv_file_empty = False
+                    if csv_file_empty:
+                        csv_writer.writeheader()
+                        csv_writer.writerow({key: name for key, name, _, _, _, _ in data})
+                        csv_file_empty = False
 
-                rows: dict[datetime, dict[str, object]] = {}
-                for key, _, value, timestamp, updated, _ in data:
-                    if updated and key != "fetch_time":
-                        timestamp = timestamp.replace(microsecond=0)
-                        rows.setdefault(timestamp, {})[key] = value
+                    rows: dict[datetime, dict[str, object]] = {}
+                    for key, _, value, timestamp, updated, _ in data:
+                        if updated and key != "fetch_time":
+                            timestamp = timestamp.replace(microsecond=0)
+                            rows.setdefault(timestamp, {})[key] = value
 
-                for timestamp, values in sorted(rows.items()):
-                    csv_writer.writerow(
-                        {"fetch_time": timestamp.strftime("%Y-%m-%d %H:%M:%S"), **values}
+                    for timestamp, values in sorted(rows.items()):
+                        csv_writer.writerow(
+                            {"fetch_time": timestamp.strftime("%Y-%m-%d %H:%M:%S"), **values}
+                        )
+
+                    csv_file.flush()
+
+                # write to status file and/or stdout
+                if status_file is not None:
+                    status_file.seek(0)
+                    status_file.truncate(0)
+
+                if not args.quiet or status_file is not None:
+                    width_name = max(len(name) for _, name, _, _, _, _ in data)
+                    width_value = max(
+                        len(str(value)) + len(unit) for _, _, value, _, _, unit in data
                     )
+                    for _, name, value, timestamp, updated, unit in data:
+                        print_value = f"{value}{unit}"
+                        print_timestamp = _format_timestamp(timestamp, fetch_time)
+                        status = (
+                            f"{name:<{width_name}}  "
+                            f"{'' if not args.monitor else '[*]  ' if updated else '     '}"
+                            f"{print_value:<{width_value}}  "
+                            f"{print_timestamp:<19}"
+                        )
 
-                csv_file.flush()
+                        if not args.quiet:
+                            print(status)
+                        if status_file is not None:
+                            status_file.write(status + "\n")
+                            status_file.flush()
 
-            # write to stdout
-            if not args.quiet:
-                width_name = max(len(name) for _, name, _, _, _, _ in data)
-                width_value = max(
-                    len(str(value)) + len(unit) for _, _, value, _, _, unit in data
-                )
-                for _, name, value, timestamp, updated, unit in data:
-                    print_value = f"{value}{unit}"
-                    print_timestamp = _format_timestamp(timestamp, fetch_time)
-                    print(
-                        f"{name:<{width_name}}  "
-                        f"{'' if not args.monitor else '[*]  ' if updated else '     '}"
-                        f"{print_value:<{width_value}}  "
-                        f"{print_timestamp:<19}"
-                    )
+                # monitor or finish
+                if not args.monitor:
+                    break
 
-            # monitor or finish
-            if not args.monitor:
-                break
+                sleep(args.monitor)
 
-            sleep(args.monitor)
-
-            # clear previous stdout buffer,
-            # unless not connected to a tty
-            if not args.quiet and sys.stdout.isatty():
-                print("\033[F" * len(data), end="")
+                # clear previous stdout buffer,
+                # unless not connected to a tty
+                if not args.quiet and sys.stdout.isatty():
+                    print("\033[F" * len(data), end="")
