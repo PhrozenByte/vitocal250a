@@ -9,23 +9,6 @@
 # SPDX-License-Identifier: MIT
 # License-Filename: LICENSE
 
-import signal
-from types import FrameType
+from vitocal250a.monitor import monitor
 
-from vitocal250a.monitor import run_monitor
-
-
-def monitor() -> None:
-    def __handle_signal(signum: int, frame: FrameType | None) -> None:
-        raise SystemExit(128 + signum)
-
-    signal.signal(signal.SIGTERM, __handle_signal)
-
-    try:
-        run_monitor()
-    except KeyboardInterrupt:
-        raise SystemExit(130)
-
-
-if __name__ == "__main__":
-    monitor()
+__all__ = ["monitor"]

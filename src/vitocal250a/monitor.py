@@ -12,12 +12,14 @@
 import argparse
 import csv
 import os
+import signal
 import sys
 from contextlib import AbstractContextManager, nullcontext
 from csv import DictWriter
 from datetime import datetime
 from pathlib import Path
 from time import sleep
+from types import FrameType
 from typing import TextIO
 
 from file_read_backwards import FileReadBackwards
@@ -192,3 +194,19 @@ def run_monitor() -> None:
                 # unless not connected to a tty
                 if not args.quiet and sys.stdout.isatty():
                     print("\033[F" * len(data), end="")
+
+
+def monitor() -> None:
+    def __handle_signal(signum: int, frame: FrameType | None) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, __handle_signal)
+
+    try:
+        run_monitor()
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+
+
+if __name__ == "__main__":
+    monitor()
