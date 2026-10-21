@@ -37,10 +37,10 @@ MOUNT="$(buildah mount "$CONTAINER")"
 echo + "rsync -v -rl --exclude .gitignore ./src/ …/" >&2
 rsync -v -rl --exclude '.gitignore' "$BUILD_DIR/src/" "$MOUNT/"
 
-echo + "rsync -v -rl --exclude .gitignore ../pyproject.toml ../src/vitocal250a …/usr/src/vitocal250a/" >&2
+echo + "rsync -v -rl --exclude .gitignore ../pyproject.toml ../src/vitocal250a …/usr/local/src/vitocal250a/" >&2
 rsync -v -rl --exclude '.gitignore' \
     "$BUILD_DIR/../pyproject.toml" "$BUILD_DIR/../src/vitocal250a" \
-    "$MOUNT/usr/src/vitocal250a"
+    "$MOUNT/usr/local/src/vitocal250a"
 
 user_add "$CONTAINER" vitocal250a 65536 "/var/local/vitocal250a"
 
@@ -58,10 +58,10 @@ if [ -n "${PYVICARE_PIP_INSTALL:-}" ]; then
 fi
 
 cmd buildah run "$CONTAINER" -- \
-    pip install --user "/usr/src/vitocal250a"
+    pip install --user "/usr/local/src/vitocal250a"
 
-echo + "rm -rf …/usr/src/vitocal250a" >&2
-rm -rf "$MOUNT/usr/src/vitocal250a"
+echo + "rm -rf …/usr/local/src/vitocal250a" >&2
+rm -rf "$MOUNT/usr/local/src/vitocal250a"
 
 python_pip_cleanup "$CONTAINER"
 
