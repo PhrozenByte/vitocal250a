@@ -84,6 +84,15 @@ class FetchTimeValue(Value):
 
 
 @dataclass
+class OnOffStatusValue(FeatureValue):
+    property_name: str = "status"
+
+    def _fetch_data(self) -> tuple[object, datetime]:
+        value, timestamp = super()._fetch_data()
+        return value == "on", timestamp
+
+
+@dataclass
 class TargetTemperatureValue(Value):
     circuit: HeatingCircuit
 
@@ -183,11 +192,10 @@ def get_features(heatpump: HeatPump) -> Iterator[Value]:
             f"heating.circuits.{circuit.id}.temperature",
             unit=" °C",
         )
-        yield FeatureValue(
+        yield OnOffStatusValue(
             f"{circuit.getName()} Heizkreispumpe Status",
             heatpump,
             f"heating.circuits.{circuit.id}.circulation.pump",
-            "status",
         )
 
     # boiler
@@ -221,11 +229,8 @@ def get_features(heatpump: HeatPump) -> Iterator[Value]:
     yield FeatureValue(
         "Wärmeerzeuger Anlagendruck", heatpump, "heating.sensors.pressure.supply", unit=" bar"
     )
-    yield FeatureValue(
-        "Wärmeerzeuger Interne Pumpe Status",
-        heatpump,
-        "heating.boiler.pumps.internal",
-        "status",
+    yield OnOffStatusValue(
+        "Wärmeerzeuger Interne Pumpe Status", heatpump, "heating.boiler.pumps.internal"
     )
     # for target percentage see heating.boiler.pumps.internal.target
     yield FeatureValue(
