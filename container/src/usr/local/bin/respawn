@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Restart commands on failure with exponential backoff and retry counter reset."""
+
+# respawn.py - A command restart wrapper with exponential backoff.
+#
+# Copyright (c) 2026  Daniel Rudolf
+#
+# This work is licensed under the terms of the MIT license.
+# For a copy, see <https://opensource.org/licenses/MIT>.
+#
+# SPDX-License-Identifier: MIT
+
+import argparse
+import random
+import signal
+import sys
+import time
+from datetime import datetime
+from signal import SIGINT, SIGKILL, SIGSTOP, SIGTERM, Signals
+from subprocess import Popen
+from types import FrameType
+
+_process: Popen[bytes] | None = None
+_quit_on_signals: list[Signals] = [SIGINT, SIGKILL, SIGTERM]
+_quit_on_exit_codes: str = ",".join(["0", *[str(128 + signum) for signum in _quit_on_signals]])
+
+
+def _handle_signal(signum: int, frame: FrameType | None) -> None:
+    if _process is not None and _process.poll() is None:
+        _process.send_signal(signum)
+    elif signum in _quit_on_signals:
+        raise SystemExit(128 + signum)
+
+
+def main() -> None:
+    global _process
+
+    for signum in signal.valid_signals():
+        if signum not in (SIGKILL, SIGSTOP):
+            signal.signal(signum, _handle_signal)
+
+    # initialize CLI
+    script_usage = "%(prog)s [options] [--] COMMAND [ARGS ...]"
+    script_description = (
+        "Run a command and automatically restart it when it exits unexpectedly. Restart "
+        "attempts use exponential backoff with optional jitter and configurable limits. "
+        "The retry counter is reset when the command runs for a specified duration. "
+        "Signals are forwarded to the running process."
+    )
+    script_epilog = "Made with ♥ by Daniel Rudolf <https://www.daniel-rudolf.de/>"
+    help_command = "command to execute"
+    help_args = "optional arguments to pass to COMMAND"
+    help_sec = "time to sleep in seconds before restarting a service; defaults to 0.1 seconds"
+    help_jitter = (
+        "add a uniformly distributed random delay between 0 and the specified "
+        "value (in seconds) before restarting a service; defaults to 0.0 seconds"
+    )
+    help_backoff = (
+        "backoff factor to increase the time between restart attempts, calculated as "
+        "`({sec} + {jitter}) * ({backoff} ** {number_of_retries})`; defaults to 2.0"
+    )
+    help_max_sec = (
+        "maximum delay in seconds before restarting a service; limits the delay as it "
+        "increases with the backoff factor; defaults to 0.0 seconds (no limit)"
+    )
+    help_max_count = "maximum number of restart attempts before giving up; defaults to 5"
+    help_reset_counter = (
+        "service runtime in seconds after which the restart counter is reset; "
+        "defaults to 60.0 seconds"
+    )
+    help_no_restart = (
+        f"comma-separated list of exit codes that suppress automatic restarts; defaults to "
+        f"`{_quit_on_exit_codes}`, corresponding to a clean exit or termination by "
+        f"{', '.join([x.name for x in _quit_on_signals])}"
+    )
+    help_quiet = "don't report retries to stderr"
+
+    parser = argparse.ArgumentParser(
+        usage=script_usage, description=script_description, epilog=script_epilog
+    )
+
+    parser.add_argument("COMMAND", type=str, help=help_command)
+    parser.add_argument("ARGS", type=str, nargs=argparse.REMAINDER, help=help_args)
+    parser.add_argument("-s", "--sec", type=float, default=0.1, help=help_sec)
+    parser.add_argument("-j", "--jitter", type=float, default=0.0, help=help_jitter)
+    parser.add_argument("-b", "--backoff", type=float, default=2.0, help=help_backoff)
+    parser.add_argument("-m", "--max-sec", type=float, default=0.0, help=help_max_sec)
+    parser.add_argument("-c", "--max-count", type=int, default=5, help=help_max_count)
+    parser.add_argument(
+        "-r", "--reset-counter", type=float, default=60.0, help=help_reset_counter
+    )
+    parser.add_argument(
+        "-e", "--no-restart", type=str, default=_quit_on_exit_codes, help=help_no_restart
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help=help_quiet)
+
+    args = parser.parse_args()
+
+    try:
+        quit_on_exit_codes = [int(x) for x in args.no_restart.split(",")]
+    except ValueError:
+        parser.error(
+            f"argument -e/--no-restart: invalid comma-separated list of exit codes: {args.no_restart!r}"
+        )
+
+    # run restart manager
+    restart_counter: int = 0
+    exit_code: int
+
+    while True:
+        time_started = time.monotonic()
+
+        try:
+            _process = Popen([args.COMMAND, *args.ARGS])
+            exit_code = _process.wait()
+
+            if exit_code < 0:
+                exit_code = 128 + -exit_code
+        except OSError as exc:
+            print(f"{parser.prog}: error: argument COMMAND: {exc}", file=sys.stderr)
+            raise SystemExit(127)
+        finally:
+            _process = None
+
+        if exit_code in quit_on_exit_codes:
+            raise SystemExit(exit_code)
+
+        if 0 < args.reset_counter <= time.monotonic() - time_started:
+            restart_counter = 0
+
+        if not args.quiet:
+            restart_report = (
+                f"[{datetime.now().isoformat(' ')}] "
+                f"process terminated with exit code {exit_code}, "
+                f"restart counter is at {restart_counter}"
+            )
+            print(restart_report, file=sys.stderr)
+
+        if 0 < args.max_count <= restart_counter:
+            raise SystemExit(exit_code)
+
+        restart_delay = max(args.sec + random.uniform(0, args.jitter), 0.0)
+        if args.backoff > 0.0:
+            restart_delay = restart_delay * pow(args.backoff, restart_counter)
+        if args.max_sec > 0.0:
+            restart_delay = min(restart_delay, args.max_sec)
+        time.sleep(restart_delay)
+
+        restart_counter += 1
+
+
+if __name__ == "__main__":
+    main()
