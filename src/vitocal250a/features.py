@@ -28,9 +28,7 @@ class Value:
 
     value: object | None = field(default=None, init=False, repr=False)
     timestamp: datetime | None = field(default=None, init=False, repr=False)
-
-    last_value: object | None = field(default=None, init=False, repr=False)
-    last_timestamp: datetime | None = field(default=None, init=False, repr=False)
+    updated: bool | None = field(default=None, init=False, repr=False)
 
     @property
     def key(self) -> str:
@@ -42,12 +40,13 @@ class Value:
     def fetch_data(self) -> tuple[object, datetime, bool]:
         value, timestamp = self._fetch_data()
         updated = (
-            self.last_timestamp is None
-            or abs(timestamp.timestamp() - self.last_timestamp.timestamp()) >= 1
+            self.timestamp is None
+            or abs(timestamp.timestamp() - self.timestamp.timestamp()) >= 1
         )
 
-        self.last_value = value
-        self.last_timestamp = timestamp
+        self.value = value
+        self.timestamp = timestamp
+        self.updated = updated
         return value, timestamp, updated
 
 

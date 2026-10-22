@@ -117,8 +117,8 @@ def run_monitor() -> None:
 
                     for key, value in row.items():
                         if value and key in init_features:
-                            features[key].last_value = value
-                            features[key].last_timestamp = fetch_time
+                            features[key].value = value
+                            features[key].timestamp = fetch_time
                             init_features.remove(key)
 
     # fetch API and write status
