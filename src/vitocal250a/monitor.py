@@ -16,7 +16,7 @@ import signal
 import sys
 from contextlib import AbstractContextManager, nullcontext
 from csv import DictWriter
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from types import FrameType
@@ -24,8 +24,8 @@ from typing import TextIO
 
 from file_read_backwards import FileReadBackwards
 
-from .features import get_features
-from .vicare import init_vicare
+from vitocal250a.features import get_features
+from vitocal250a.vicare import init_vicare
 
 
 def _format_timestamp(timestamp: datetime, reference: datetime) -> str:
@@ -134,8 +134,14 @@ def run_monitor() -> None:
                 fetch_time = service.cache_time.astimezone()
 
                 # collect data
-                data: list[tuple[str, str, object, datetime, bool, str]] = [
-                    (feature.key, feature.name, *feature.fetch_data(), feature.unit)
+                data: list[tuple[str, str, object, datetime, bool, str, bool]] = [
+                    (
+                        feature.key,
+                        feature.name,
+                        *feature.fetch_data(),
+                        feature.unit,
+                        feature.hidden,
+                    )
                     for feature in features.values()
                 ]
 
@@ -145,11 +151,11 @@ def run_monitor() -> None:
 
                     if csv_file_empty:
                         csv_writer.writeheader()
-                        csv_writer.writerow({key: name for key, name, _, _, _, _ in data})
+                        csv_writer.writerow({key: name for key, name, _, _, _, _, _ in data})
                         csv_file_empty = False
 
                     rows: dict[datetime, dict[str, object]] = {}
-                    for key, _, value, timestamp, updated, _ in data:
+                    for key, _, value, timestamp, updated, _, _ in data:
                         if updated and key != "fetch_time":
                             timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
                             rows.setdefault(timestamp, {})[key] = value
@@ -167,11 +173,18 @@ def run_monitor() -> None:
                     status_file.truncate(0)
 
                 if not args.quiet or status_file is not None:
-                    width_name = max(len(name) for _, name, _, _, _, _ in data)
-                    width_value = max(
-                        len(str(value)) + len(unit) for _, _, value, _, _, unit in data
+                    width_name = max(
+                        len(name) for _, name, _, _, _, _, hidden in data if not hidden
                     )
-                    for _, name, value, timestamp, updated, unit in data:
+                    width_value = max(
+                        len(str(value)) + len(unit)
+                        for _, _, value, _, _, unit, hidden in data
+                        if not hidden
+                    )
+                    for _, name, value, timestamp, updated, unit, hidden in data:
+                        if hidden:
+                            continue
+
                         print_value = f"{value}{unit}"
                         print_timestamp = _format_timestamp(timestamp, fetch_time)
                         status = (

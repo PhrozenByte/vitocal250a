@@ -24,6 +24,7 @@ from PyViCare.PyViCareUtils import PyViCareNotSupportedFeatureError
 class Value:
     name: str
     unit: str = field(default="", repr=False, kw_only=True)
+    hidden: bool = field(default=False, repr=False, kw_only=True)
 
     value: object | None = field(default=None, init=False, repr=False)
     timestamp: datetime | None = field(default=None, init=False, repr=False)
@@ -81,6 +82,20 @@ class FetchTimeValue(Value):
         timestamp = self.service.cache_time.astimezone()
         value = timestamp.strftime("%Y-%m-%d %H:%M:%S")
         return value, timestamp
+
+
+@dataclass
+class ApiRequestValue(Value):
+    service: ViCareCachedServiceBase
+    hidden: bool = field(default=True, repr=False, kw_only=True)
+
+    @property
+    def key(self) -> str:
+        return "api_request"
+
+    def _fetch_data(self) -> tuple[object, datetime]:
+        timestamp = self.service.cache_time.astimezone()
+        return True, timestamp
 
 
 @dataclass
@@ -142,6 +157,7 @@ def get_features(heatpump: HeatPump) -> Iterator[Value]:
     # zero values, but might change in the future:
     # - heating.configuration.houseHeatingLoad
     yield FetchTimeValue("Abfragezeit", service)
+    yield ApiRequestValue("API Request", service)
     yield FeatureValue("Wifi Signalstärke", heatpump, "tcu.wifi", "strength", unit=" dBm")
     yield FeatureValue(
         "Außentemperatur", heatpump, "heating.sensors.temperature.outside", unit=" °C"
