@@ -16,7 +16,7 @@ import signal
 import sys
 from contextlib import AbstractContextManager, nullcontext
 from csv import DictWriter
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from time import sleep
 from types import FrameType
@@ -110,7 +110,10 @@ def run_monitor() -> None:
                     ):
                         break
 
-                    fetch_time = datetime.fromisoformat(row["fetch_time"]).astimezone()
+                    fetch_time = datetime.fromisoformat(row["fetch_time"])
+                    if fetch_time.tzinfo is None:
+                        fetch_time = fetch_time.replace(tzinfo=UTC)
+                    fetch_time = fetch_time.astimezone()
 
                     for key, value in row.items():
                         if value and key in init_features:
@@ -148,7 +151,7 @@ def run_monitor() -> None:
                     rows: dict[datetime, dict[str, object]] = {}
                     for key, _, value, timestamp, updated, _ in data:
                         if updated and key != "fetch_time":
-                            timestamp = timestamp.replace(microsecond=0)
+                            timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
                             rows.setdefault(timestamp, {})[key] = value
 
                     for timestamp, values in sorted(rows.items()):
