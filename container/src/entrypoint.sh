@@ -16,7 +16,7 @@ set -e
 if [ "$1" == "vitocal250a-monitor" ]; then
     # run vitocal250a-monitor unprivileged and with respawn.py
     exec su -p -s /bin/sh vitocal250a -c '"$@"' -- '/bin/sh' \
-        respawn --sec 0.1 --backoff 5 --max-sec 1800 --max-count 10 --reset-counter 3600 \
+        respawn --sec 0.1 --backoff 5 --max-sec 1800 --max-count 10 --reset-counter 900 -- \
         "$@"
 fi
 
