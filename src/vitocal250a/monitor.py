@@ -107,6 +107,7 @@ def run_monitor() -> None:
                         len(init_features) == 0
                         or row["fetch_time"] == "fetch_time"
                         or row["fetch_time"] == features["fetch_time"].name
+                        or row["fetch_time"] == features["fetch_time"].unit
                     ):
                         break
 
@@ -149,11 +150,14 @@ def run_monitor() -> None:
                 if csv_file is not None:
                     assert csv_writer is not None
 
+                    # write header rows
                     if csv_file_empty:
                         csv_writer.writeheader()
                         csv_writer.writerow({key: name for key, name, _, _, _, _, _ in data})
+                        csv_writer.writerow({key: unit for key, _, _, _, _, unit, _ in data})
                         csv_file_empty = False
 
+                    # write data rows
                     rows: dict[datetime, dict[str, object]] = {}
                     for key, _, value, timestamp, updated, _, _ in data:
                         if updated and key != "fetch_time":
@@ -181,9 +185,12 @@ def run_monitor() -> None:
                         for _, _, value, _, _, unit, hidden in data
                         if not hidden
                     )
-                    for _, name, value, timestamp, updated, unit, hidden in data:
+                    for key, name, value, timestamp, updated, unit, hidden in data:
                         if hidden:
                             continue
+                        if key == "fetch_time":
+                            value = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                            unit = timestamp.strftime("%:z")[:6]
 
                         print_value = f"{value}{unit}"
                         print_timestamp = _format_timestamp(timestamp, fetch_time)

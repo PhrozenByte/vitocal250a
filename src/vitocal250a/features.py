@@ -10,7 +10,7 @@
 # License-Filename: LICENSE
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Iterator, cast
 
 from PyViCare.PyViCareCachedServiceBase import ViCareCachedServiceBase
@@ -72,6 +72,7 @@ class FeatureValue(Value):
 @dataclass
 class FetchTimeValue(Value):
     service: ViCareCachedServiceBase
+    unit: str = field(default="+00:00", repr=False, kw_only=True)
 
     @property
     def key(self) -> str:
@@ -79,7 +80,7 @@ class FetchTimeValue(Value):
 
     def _fetch_data(self) -> tuple[object, datetime]:
         timestamp = self.service.cache_time.astimezone()
-        value = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        value = timestamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
         return value, timestamp
 
 
@@ -384,22 +385,22 @@ def get_features(heatpump: HeatPump) -> Iterator[Value]:
     # - heating.spf.heating (replaces heating.scop.heating)
     # - heating.spf.total (replaces heating.scop.total)
     yield FeatureValue(
-        "Stromverbrauch (Aktuell)", heatpump, "heating.power.consumption.current", unit=" kw"
+        "Stromverbrauch (Aktuell)", heatpump, "heating.power.consumption.current", unit=" kW"
     )
     yield FeatureValue(
         "Stromverbrauch (Tag)",
         heatpump,
         "heating.power.consumption.summary.heating",
         "currentDay",
-        unit=" kw",
+        unit=" kWh",
     )
     yield FeatureValue(
-        "Thermische Leistung (Aktuell)", heatpump, "heating.heat.production.current", unit=" kw"
+        "Thermische Leistung (Aktuell)", heatpump, "heating.heat.production.current", unit=" kW"
     )
     yield FeatureValue(
         "Thermische Leistung (Tag)",
         heatpump,
         "heating.heat.production.summary.heating",
         "currentDay",
-        unit=" kw",
+        unit=" kWh",
     )
