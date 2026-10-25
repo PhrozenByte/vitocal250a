@@ -9,11 +9,11 @@
 # SPDX-License-Identifier: MIT
 # License-Filename: LICENSE
 
-import argparse
 import csv
 import os
 import signal
 import sys
+from argparse import ArgumentParser, Namespace
 from contextlib import AbstractContextManager, nullcontext
 from csv import DictWriter
 from datetime import UTC, datetime
@@ -24,8 +24,7 @@ from typing import TextIO
 
 from file_read_backwards import FileReadBackwards
 
-from vitocal250a.features import get_features
-from vitocal250a.vicare import init_vicare
+from vitocal250a.api_fetcher import get_features, init_vicare
 
 
 def _format_timestamp(timestamp: datetime, reference: datetime) -> str:
@@ -36,7 +35,7 @@ def _format_timestamp(timestamp: datetime, reference: datetime) -> str:
     return timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def run_monitor() -> None:
+def _read_env() -> tuple[str, str]:
     try:
         client_id = os.environ["VICARE_CLIENT_ID"]
     except KeyError:
@@ -48,8 +47,11 @@ def run_monitor() -> None:
     except KeyError:
         token_file = "token.save"
 
-    # initialize CLI
-    parser = argparse.ArgumentParser()
+    return client_id, token_file
+
+
+def _parse_args() -> Namespace:
+    parser = ArgumentParser()
 
     parser.add_argument("--status-file", type=str, help="Status file name")
     parser.add_argument("--csv-file", type=str, help="CSV file name")
@@ -62,6 +64,14 @@ def run_monitor() -> None:
 
     if args.quiet and not args.status_file and not args.csv_file:
         parser.error("--quiet requires passing either --status-file or --csv-file")
+
+    return args
+
+
+def run_monitor() -> None:
+    # read env vars and initialize CLI
+    client_id, token_file = _read_env()
+    args = _parse_args()
 
     # initialize PyViCare
     vicare, service, heatpump = init_vicare(client_id, token_file)
@@ -224,11 +234,9 @@ def monitor() -> None:
         raise SystemExit(128 + signum)
 
     signal.signal(signal.SIGTERM, __handle_signal)
+    signal.signal(signal.SIGINT, __handle_signal)
 
-    try:
-        run_monitor()
-    except KeyboardInterrupt:
-        raise SystemExit(130)
+    run_monitor()
 
 
 if __name__ == "__main__":
