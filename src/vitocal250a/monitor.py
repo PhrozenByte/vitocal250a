@@ -53,6 +53,7 @@ def _read_env() -> tuple[str, str]:
 def _parse_args() -> Namespace:
     parser = ArgumentParser()
 
+    parser.add_argument("--fields", type=str, required=True, help="Fields file name (TOML)")
     parser.add_argument("--status-file", type=str, help="Status file name")
     parser.add_argument("--csv-file", type=str, help="CSV file name")
     parser.add_argument(
@@ -77,7 +78,7 @@ def run_monitor() -> None:
     vicare, service, heatpump = init_vicare(client_id, token_file)
 
     # build features
-    features = {feature.key: feature for feature in get_features(heatpump)}
+    features = get_features(Path(args.fields), heatpump)
     feature_keys = list(features.keys())
 
     # initialize status file

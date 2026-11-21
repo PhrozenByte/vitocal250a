@@ -9,15 +9,18 @@
 # SPDX-License-Identifier: MIT
 # License-Filename: LICENSE
 
+import re
+import tomllib
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Iterator, cast
+from pathlib import Path
+from string import Formatter
+from typing import Any, cast
 
 from PyViCare.PyViCare import PyViCare
 from PyViCare.PyViCareBrowserOAuthManager import ViCareBrowserOAuthManager
 from PyViCare.PyViCareCachedServiceBase import ViCareCachedServiceBase
-from PyViCare.PyViCareDevice import Device
 from PyViCare.PyViCareHeatingDevice import HeatingCircuit
 from PyViCare.PyViCareHeatPump import HeatPump
 from PyViCare.PyViCareUtils import PyViCareNotSupportedFeatureError
@@ -82,17 +85,27 @@ def init_vicare(
 
 @dataclass
 class Value:
+    key: str
     name: str
+
     unit: str = field(default="", repr=False, kw_only=True)
     hidden: bool = field(default=False, repr=False, kw_only=True)
+
+    heatpump: HeatPump = field(repr=False, kw_only=True)
+    service: ViCareCachedServiceBase = field(init=False, repr=False)
 
     value: object | None = field(default=None, init=False, repr=False)
     timestamp: datetime | None = field(default=None, init=False, repr=False)
     updated: bool | None = field(default=None, init=False, repr=False)
 
-    @property
-    def key(self) -> str:
-        raise NotImplementedError
+    def __post_init__(self) -> None:
+        service = cast(ViCareCachedServiceBase, self.heatpump.service)
+        if not isinstance(service, ViCareCachedServiceBase):
+            raise ValueError(
+                f"Invalid ViCare service: Expecting a {ViCareCachedServiceBase!r} "
+                f"instance, got {service!r}"
+            )
+        self.service = service
 
     def _fetch_data(self) -> tuple[object, datetime]:
         raise NotImplementedError
@@ -112,18 +125,21 @@ class Value:
 
 @dataclass
 class FeatureValue(Value):
-    device: Device
-    feature_name: str
-    property_name: str = "value"
+    feature_name: str = field(init=False, repr=False)
+    property_name: str = field(default="value", init=False, repr=False)
 
-    @property
-    def key(self) -> str:
-        if self.property_name != "value":
-            return f"{self.feature_name}[{self.property_name}]"
-        return self.feature_name
+    def __post_init__(self) -> None:
+        super().__post_init__()
+
+        match = re.fullmatch(r"(?P<feature_name>[^[]+)\[(?P<property_name>[^]]+)]$", self.key)
+        if match is not None:
+            self.feature_name = match["feature_name"]
+            self.property_name = match["property_name"]
+        else:
+            self.feature_name = self.key
 
     def _fetch_data(self) -> tuple[object, datetime]:
-        data = self.device.getProperty(self.feature_name)
+        data = self.heatpump.getProperty(self.feature_name)
         value = data["properties"][self.property_name]["value"]
         timestamp = datetime.fromisoformat(data["timestamp"]).astimezone()
         return value, timestamp
@@ -131,12 +147,7 @@ class FeatureValue(Value):
 
 @dataclass
 class FetchTimeValue(Value):
-    service: ViCareCachedServiceBase
     unit: str = field(default="+00:00", repr=False, kw_only=True)
-
-    @property
-    def key(self) -> str:
-        return "fetch_time"
 
     def _fetch_data(self) -> tuple[object, datetime]:
         timestamp = self.service.cache_time.astimezone()
@@ -146,12 +157,7 @@ class FetchTimeValue(Value):
 
 @dataclass
 class ApiRequestValue(Value):
-    service: ViCareCachedServiceBase
     hidden: bool = field(default=True, repr=False, kw_only=True)
-
-    @property
-    def key(self) -> str:
-        return "api_request"
 
     def _fetch_data(self) -> tuple[object, datetime]:
         timestamp = self.service.cache_time.astimezone()
@@ -160,7 +166,7 @@ class ApiRequestValue(Value):
 
 @dataclass
 class OnOffStatusValue(FeatureValue):
-    property_name: str = "status"
+    property_name: str = field(default="status", init=False, repr=False)
 
     def _fetch_data(self) -> tuple[object, datetime]:
         value, timestamp = super()._fetch_data()
@@ -169,15 +175,18 @@ class OnOffStatusValue(FeatureValue):
 
 @dataclass
 class TargetTemperatureValue(Value):
-    circuit: HeatingCircuit
+    circuit: HeatingCircuit = field(init=False, repr=False)
 
-    @property
-    def key(self) -> str:
-        return f"heating.circuits.{self.circuit.id}.target_temperature"
+    def __post_init__(self) -> None:
+        super().__post_init__()
 
-    @property
-    def device(self) -> Device:
-        return self.circuit.device
+        match = re.fullmatch(r"heating\.circuits\.([0-9]+)\.target_temperature$", self.key)
+        if match is None:
+            raise ValueError(
+                f"Invalid key: Key name must match "
+                f"'heating.circuits.{{circuit_id}}.target_temperature', got {self.key!r}"
+            )
+        self.circuit = self.heatpump.getCircuit(match[1])  # type: ignore[no-untyped-call]
 
     def _fetch_data(self) -> tuple[object, datetime]:
         active_program_data = self.circuit.getProperty(
@@ -205,262 +214,90 @@ class TargetTemperatureValue(Value):
         return value, datetime.fromisoformat(timestamp).astimezone()
 
 
-def get_features(heatpump: HeatPump) -> Iterator[Value]:
-    service = cast(ViCareCachedServiceBase, heatpump.service)
-    assert isinstance(service, ViCareCachedServiceBase)
+class GetterProxy[ObjectType]:
+    _obj: ObjectType
 
-    # basic info
-    # static, but potentially interesting values:
-    # - heating.configuration.bufferCylinderSize
-    # - heating.configuration.centralHeatingCylinderSize
-    # - heating.configuration.dhwCylinderSize
-    # zero values, but might change in the future:
-    # - heating.configuration.houseHeatingLoad
-    yield FetchTimeValue("Abfragezeit", service)
-    yield ApiRequestValue("API Request", service)
-    yield FeatureValue("Wifi Signalstärke", heatpump, "tcu.wifi", "strength", unit=" dBm")
-    yield FeatureValue(
-        "Außentemperatur", heatpump, "heating.sensors.temperature.outside", unit=" °C"
-    )
+    def __init__(self, obj: ObjectType) -> None:
+        self._obj = obj
 
-    # circuits
-    for circuit in heatpump.circuits:
-        # for schedule see heating.circuits.1.heating.schedule
-        yield FeatureValue(
-            f"{circuit.getName()} Modus",
-            heatpump,
-            f"heating.circuits.{circuit.id}.operating.modes.active",
-        )
-        # for "holiday" program schedule see heating.operating.programs.holiday
-        # for "holidayAtHome" program schedule see heating.operating.programs.holidayAtHome
-        # programs to evaluate (see heating.circuits.1.operating.programs.*):
-        # - standby
-        # - frostprotection (enables heating.circuits.1.frostprotection?)
-        # - fixed (what is that?)
-        # - forcedLastFromSchedule
-        # - holidayAtHome (should exist, but doesn't?)
-        yield FeatureValue(
-            f"{circuit.getName()} Programm",
-            heatpump,
-            f"heating.circuits.{circuit.id}.operating.programs.active",
-        )
-        # masks target temperatures:
-        # - heating.circuits.1.operating.programs.reducedHeating
-        # - heating.circuits.1.operating.programs.normalHeating
-        # - heating.circuits.1.operating.programs.comfortHeating
-        yield TargetTemperatureValue(
-            f"{circuit.getName()} Ziel-Raumtemperatur", circuit, unit=" °C"
-        )
-        yield FeatureValue(
-            f"{circuit.getName()} Vorlauftemperatur",
-            heatpump,
-            f"heating.circuits.{circuit.id}.sensors.temperature.supply",
-            unit=" °C",
-        )
-        # should be equal to heating.boiler.temperature.current
-        # heatpump-internal value of `circuit.getTargetSupplyTemperature()`
-        # uses heating.circuits.1.heating.curve next to buffer and outside temperatures
-        # compressor won't start right away, see heating.configuration.temperature.outside.DampingFactor
-        # for min/max values see heating.circuits.1.temperature.levels
-        yield FeatureValue(
-            f"{circuit.getName()} Ziel-Vorlauftemperatur",
-            heatpump,
-            f"heating.circuits.{circuit.id}.temperature",
-            unit=" °C",
-        )
-        yield OnOffStatusValue(
-            f"{circuit.getName()} Heizkreispumpe Status",
-            heatpump,
-            f"heating.circuits.{circuit.id}.circulation.pump",
-        )
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("get") and name.endswith("()"):
+            getter_name = name[:-2]
+            getter = getattr(self._obj, getter_name)
+            if callable(getter):
+                return getter()
+        return getattr(self._obj, name)
 
-    # boiler
-    # replaces heating.buffer.sensors.temperature.main
-    yield FeatureValue(
-        "Pufferspeicher Temperatur",
-        heatpump,
-        "heating.bufferCylinder.sensors.temperature.main",
-        unit=" °C",
-    )
 
-    # heating device
-    # unknown sensors, require verification:
-    # - heating.heatGeneration.0.secondaryCircuit.sensors.temperature
-    #   (should replace heating.sensors.temperature.allengra, but doesn't exist, and is zero)
-    # - heating.sensors.valve.0.expansion.target
-    # - heating.sensors.valve.1.expansion.target
-    # - heating.valves.fourThreeWay.position
-    yield FeatureValue(
-        "Wärmeerzeuger Vorlauftemperatur",
-        heatpump,
-        "heating.boiler.sensors.temperature.commonSupply",
-        unit=" °C",
-    )
-    yield FeatureValue(
-        "Wärmeerzeuger Rücklauftemperatur",
-        heatpump,
-        "heating.sensors.temperature.return",
-        unit=" °C",
-    )
-    yield FeatureValue(
-        "Wärmeerzeuger Anlagendruck", heatpump, "heating.sensors.pressure.supply", unit=" bar"
-    )
-    yield OnOffStatusValue(
-        "Wärmeerzeuger Interne Pumpe Status", heatpump, "heating.boiler.pumps.internal"
-    )
-    # for target percentage see heating.boiler.pumps.internal.target
-    yield FeatureValue(
-        "Wärmeerzeuger Interne Pumpe Aktiv",
-        heatpump,
-        "heating.boiler.pumps.internal.current",
-        unit="%",
-    )
-    # will be replaced by heating.heatGeneration.0.secondaryCircuit.sensors.volumetricFlow
-    yield FeatureValue(
-        "Wärmeerzeuger Volumenstrom",
-        heatpump,
-        "heating.sensors.volumetricFlow.allengra",
-        unit=" l/h",
-    )
-    # for valve status see heating.primaryCircuit.valves.fourThreeWay
-    yield FeatureValue(
-        "Wärmeerzeuger Primärkreis",
-        heatpump,
-        "heating.primaryCircuit.sensors.temperature.supply",
-        unit=" °C",
-    )
-    # for operation status see heating.secondaryCircuit.operation.state
-    # should, in practice, always match heating.circuits.1.operating.modes.active
-    # for valve status see heating.secondaryCircuit.valves.fourThreeWay
-    yield FeatureValue(
-        "Wärmeerzeuger Sekundärkreis",
-        heatpump,
-        "heating.secondaryCircuit.sensors.temperature.supply",
-        unit=" °C",
-    )
-    yield FeatureValue(
-        "Wärmeerzeuger Entfrostung", heatpump, "heating.outdoor.defrosting", "active"
-    )
+def get_features(features_file_path: Path, heatpump: HeatPump) -> dict[str, Value]:
+    tpl_vars: dict[str, list[object]] = {
+        "heatpump": [GetterProxy(heatpump)],
+        "circuit": [GetterProxy(circuit) for circuit in heatpump.circuits],
+        "coolingCircuit": [
+            GetterProxy(coolingCircuit) for coolingCircuit in heatpump.coolingCircuits
+        ],
+        "burner": [GetterProxy(burner) for burner in heatpump.burners],
+        "compressor": [GetterProxy(compressor) for compressor in heatpump.compressors],
+        "condensor": [GetterProxy(condensor) for condensor in heatpump.condensors],
+        "evaporator": [GetterProxy(evaporator) for evaporator in heatpump.evaporators],
+        "inverter": [GetterProxy(inverter) for inverter in heatpump.inverters],
+        "fan": [GetterProxy(fan) for fan in heatpump.fans],
+    }
+    tpl_var_regex: str = "|".join([re.escape(field_var) for field_var in tpl_vars])
 
-    # fans
-    for fan in heatpump.fans:
-        yield FeatureValue(
-            f"Lüfter {int(fan.component) + 1}",
-            heatpump,
-            f"heating.primaryCircuit.fans.{fan.component}.current",
-            unit="%",
-        )
+    features: dict[str, Value] = {}
+    with features_file_path.open("rb") as features_file:
+        features_raw: dict[str, dict[str, Any]] = tomllib.load(features_file)
+        for key, data in features_raw.items():
+            tpl_var_name: str | None = None
+            for _, tpl_field_name, _, _ in Formatter().parse(key):
+                if tpl_field_name is None:
+                    continue
 
-    # compressors
-    for compressor in heatpump.compressors:
-        # internal sensors, require verification:
-        # - heating.compressors.0.heater.crankcase
-        # - heating.compressors.0.sensors.pressure.inlet
-        # - heating.compressors.0.sensors.temperature.inlet
-        # - heating.compressors.0.sensors.temperature.motorChamber
-        # - heating.compressors.0.sensors.temperature.oil
-        # - heating.compressors.0.sensors.temperature.outlet
-        yield FeatureValue(
-            "Verdichter Status", heatpump, f"heating.compressors.{compressor.id}", "active"
-        )
-        yield FeatureValue(
-            "Verdichter Phase", heatpump, f"heating.compressors.{compressor.id}", "phase"
-        )
-        # for target rpm see heating.compressors.0.speed.setpoint
-        yield FeatureValue(
-            "Verdichter Geschwindigkeit",
-            heatpump,
-            f"heating.compressors.{compressor.id}.speed.current",
-            unit=" rpm",
-        )
-        yield FeatureValue(
-            "Verdichter Betriebsstunden",
-            heatpump,
-            f"heating.compressors.{compressor.id}.statistics",
-            "hours",
-            unit=" h",
-        )
-        yield FeatureValue(
-            "Verdichter Starts",
-            heatpump,
-            f"heating.compressors.{compressor.id}.statistics",
-            "starts",
-        )
+                match = re.match(rf"({tpl_var_regex})(?:\.|$)", tpl_field_name)
+                if match is None:
+                    raise ValueError(
+                        f"Invalid field {key!r}: Invalid key: "
+                        f"Unknown variable: {tpl_field_name!r}"
+                    )
+                if tpl_var_name is not None and tpl_var_name != match[1]:
+                    raise ValueError(
+                        f"Invalid field {key!r}: Invalid key: "
+                        f"Conflicting variables: {tpl_var_name!r} and {match[1]!r}"
+                    )
+                tpl_var_name = match[1]
 
-    # condensers
-    # internal sensors, require verification:
-    # - heating.condensors.0.sensors.temperature.liquid
+            name: str = data.pop("name", "")
+            if not name:
+                raise ValueError(f"Invalid field {key!r}: Missing name")
 
-    # economizers
-    # internal sensors, require verification:
-    # - heating.economizers.0.sensors.temperature.liquid
+            factory: type[Value] = VALUE_CLASSES[""]
+            if "class" in data:
+                if data["class"] not in VALUE_CLASSES:
+                    raise ValueError(f"Invalid field {key!r}: Unknown class: {data['class']!r}")
+                factory = VALUE_CLASSES[data.pop("class")]
 
-    # evaporators
-    # internal sensors, require verification:
-    # - heating.evaporators.0.heater.base
-    # - heating.evaporators.0.sensors.temperature.liquid
-    # - heating.evaporators.0.sensors.temperature.overheat
+            if tpl_var_name is not None:
+                for tpl_var in tpl_vars[tpl_var_name]:
+                    feature = factory(
+                        key.format(**{tpl_var_name: tpl_var}),
+                        name.format(**{tpl_var_name: tpl_var}),
+                        **data,
+                        heatpump=heatpump,
+                    )
+                    features[feature.key] = feature
+            else:
+                feature = factory(key, name, **data, heatpump=heatpump)
+                features[feature.key] = feature
 
-    # heating rods
-    # currently there are no heating rods installed, otherwise see:
-    # - heatingRods.heatGeneration.N.statistics (replaces heating.heatingRod.statistics)
-    # - heatingRods.heatGeneration.N (replaces heating.configuration.heatingRod.*)
-    # - heating.heatingRod.heating (replaces heating.heatingRod)
+    return features
 
-    # inverters
-    for inverter in heatpump.inverters:
-        # internal sensors, require verification:
-        # - heating.inverters.0.sensors.temperature.powerModule
-        yield FeatureValue(
-            "Inverter Strom",
-            heatpump,
-            f"heating.inverters.{inverter.id}.sensors.power.current",
-            unit=" A",
-        )
-        yield FeatureValue(
-            "Inverter Ausgabeleistung",
-            heatpump,
-            f"heating.inverters.{inverter.id}.sensors.power.output",
-            unit=" W",
-        )
 
-    # Domestic Hot Water (DHW)
-    # DHW is installed, but currently not being used
-    # interesting data points:
-    # - heating.dhw.scaldProtection
-    # - heating.dhw.temperature.hysteresis
-
-    # energy statistics
-    # other, but currently unused statistics:
-    # - heating.heat.production.summary.cooling
-    # - heating.heat.production.summary.dhw
-    # - heating.heatingRod.power.consumption.summary.dhw
-    # - heating.heatingRod.power.consumption.summary.heating
-    # - heating.power.consumption.dhw
-    # - heating.power.consumption.heating
-    # - heating.power.consumption.total
-    # - heating.power.consumption.summary.cooling
-    # - heating.power.consumption.summary.dhw
-    # - heating.spf.dhw (replaces heating.scop.dhw)
-    # - heating.spf.heating (replaces heating.scop.heating)
-    # - heating.spf.total (replaces heating.scop.total)
-    yield FeatureValue(
-        "Stromverbrauch (Aktuell)", heatpump, "heating.power.consumption.current", unit=" kW"
-    )
-    yield FeatureValue(
-        "Stromverbrauch (Tag)",
-        heatpump,
-        "heating.power.consumption.summary.heating",
-        "currentDay",
-        unit=" kWh",
-    )
-    yield FeatureValue(
-        "Thermische Leistung (Aktuell)", heatpump, "heating.heat.production.current", unit=" kW"
-    )
-    yield FeatureValue(
-        "Thermische Leistung (Tag)",
-        heatpump,
-        "heating.heat.production.summary.heating",
-        "currentDay",
-        unit=" kWh",
-    )
+VALUE_CLASSES: dict[str, type[Value]] = {
+    "": FeatureValue,
+    "feature": FeatureValue,
+    "target_temperature": TargetTemperatureValue,
+    "on_off_status": OnOffStatusValue,
+    "api_request": ApiRequestValue,
+    "fetch_time": FetchTimeValue,
+}
