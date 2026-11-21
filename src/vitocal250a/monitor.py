@@ -146,11 +146,12 @@ def run_monitor() -> None:
                 fetch_time = service.cache_time.astimezone()
 
                 # collect data
-                data: list[tuple[str, str, object, datetime, bool, str, bool]] = [
+                data: list[tuple[str, str, object, datetime, bool, type, str, bool]] = [
                     (
                         feature.key,
                         feature.name,
                         *feature.fetch_data(),
+                        feature.value_type,
                         feature.unit,
                         feature.hidden,
                     )
@@ -164,13 +165,19 @@ def run_monitor() -> None:
                     # write header rows
                     if csv_file_empty:
                         csv_writer.writeheader()
-                        csv_writer.writerow({key: name for key, name, _, _, _, _, _ in data})
-                        csv_writer.writerow({key: unit for key, _, _, _, _, unit, _ in data})
+                        csv_writer.writerow({key: name for key, name, _, _, _, _, _, _ in data})
+                        csv_writer.writerow(
+                            {
+                                key: value_type.__name__
+                                for key, _, _, _, _, value_type, _, _ in data
+                            }
+                        )
+                        csv_writer.writerow({key: unit for key, _, _, _, _, _, unit, _ in data})
                         csv_file_empty = False
 
                     # write data rows
                     rows: dict[datetime, dict[str, object]] = {}
-                    for key, _, value, timestamp, updated, _, _ in data:
+                    for key, _, value, timestamp, updated, _, _, _ in data:
                         if updated and key != "fetch_time":
                             timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
                             rows.setdefault(timestamp, {})[key] = value
@@ -189,14 +196,14 @@ def run_monitor() -> None:
 
                 if not args.quiet or status_file is not None:
                     width_name = max(
-                        len(name) for _, name, _, _, _, _, hidden in data if not hidden
+                        len(name) for _, name, _, _, _, _, _, hidden in data if not hidden
                     )
                     width_value = max(
                         len(str(value)) + len(unit)
-                        for _, _, value, _, _, unit, hidden in data
+                        for _, _, value, _, _, _, unit, hidden in data
                         if not hidden
                     )
-                    for key, name, value, timestamp, updated, unit, hidden in data:
+                    for key, name, value, timestamp, updated, _, unit, hidden in data:
                         if hidden:
                             continue
                         if key == "fetch_time":

@@ -88,6 +88,7 @@ class Value:
     key: str
     name: str
 
+    value_type: type = field(default=float, repr=False, kw_only=True)
     unit: str = field(default="", repr=False, kw_only=True)
     hidden: bool = field(default=False, repr=False, kw_only=True)
 
@@ -116,6 +117,15 @@ class Value:
             self.timestamp is None
             or abs(timestamp.timestamp() - self.timestamp.timestamp()) >= 1
         )
+
+        if value is not None and not isinstance(value, self.value_type):
+            try:
+                value = self.value_type(value)
+            except Exception as exc:
+                raise ValueError(
+                    f"Invalid value: Expected a value convertible to "
+                    f"{self.value_type.__name__}, got {value!r}"
+                ) from exc
 
         self.value = value
         self.timestamp = timestamp
@@ -147,6 +157,7 @@ class FeatureValue(Value):
 
 @dataclass
 class FetchTimeValue(Value):
+    value_type: type[str] = field(default=str, repr=False, kw_only=True)
     unit: str = field(default="+00:00", repr=False, kw_only=True)
 
     def _fetch_data(self) -> tuple[object, datetime]:
@@ -157,6 +168,7 @@ class FetchTimeValue(Value):
 
 @dataclass
 class ApiRequestValue(Value):
+    value_type: type[bool] = field(default=bool, repr=False, kw_only=True)
     hidden: bool = field(default=True, repr=False, kw_only=True)
 
     def _fetch_data(self) -> tuple[object, datetime]:
@@ -166,6 +178,8 @@ class ApiRequestValue(Value):
 
 @dataclass
 class OnOffStatusValue(FeatureValue):
+    value_type: type[bool] = field(default=bool, repr=False, kw_only=True)
+
     property_name: str = field(default="status", init=False, repr=False)
 
     def _fetch_data(self) -> tuple[object, datetime]:
@@ -175,6 +189,8 @@ class OnOffStatusValue(FeatureValue):
 
 @dataclass
 class TargetTemperatureValue(Value):
+    value_type: type[int] = field(default=int, repr=False, kw_only=True)
+
     circuit: HeatingCircuit = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -277,6 +293,11 @@ def get_features(features_file_path: Path, heatpump: HeatPump) -> dict[str, Valu
                     raise ValueError(f"Invalid field {key!r}: Unknown class: {data['class']!r}")
                 factory = VALUE_CLASSES[data.pop("class")]
 
+            if "type" in data:
+                if data["type"] not in VALUE_TYPES:
+                    raise ValueError(f"Invalid field {key!r}: Unknown type: {data['type']!r}")
+                data["value_type"] = VALUE_TYPES[data.pop("type")]
+
             if tpl_var_name is not None:
                 for tpl_var in tpl_vars[tpl_var_name]:
                     feature = factory(
@@ -300,4 +321,13 @@ VALUE_CLASSES: dict[str, type[Value]] = {
     "on_off_status": OnOffStatusValue,
     "api_request": ApiRequestValue,
     "fetch_time": FetchTimeValue,
+}
+
+
+VALUE_TYPES: dict[str, type] = {
+    "bool": bool,
+    "int": int,
+    "float": float,
+    "str": str,
+    "datetime": datetime,
 }
