@@ -42,6 +42,9 @@ rsync -v -rl --exclude '.gitignore' \
     "$BUILD_DIR/../pyproject.toml" "$BUILD_DIR/../src/vitocal250a" \
     "$MOUNT/usr/local/src/vitocal250a"
 
+echo + "cp ../fields.toml …/usr/local/share/vitocal250a/"
+cp "$BUILD_DIR/../fields.toml" "$MOUNT/usr/local/share/vitocal250a/"
+
 user_add "$CONTAINER" vitocal250a 65536 "/var/local/vitocal250a"
 
 cmd buildah run "$CONTAINER" -- \
@@ -76,7 +79,7 @@ cmd buildah config \
 cmd buildah config \
     --workingdir "/var/local/vitocal250a" \
     --entrypoint '[ "/entrypoint.sh" ]' \
-    --cmd '[ "vitocal250a-monitor", "--status-file", "monitor.txt", "--csv-file", "monitor.csv", "--monitor", "60", "--quiet" ]' \
+    --cmd '[ "vitocal250a-monitor", "--fields", "fields.toml", "--status-file", "monitor.txt", "--csv-file", "monitor.csv", "--monitor", "60", "--quiet" ]' \
     "$CONTAINER"
 
 cmd buildah config \

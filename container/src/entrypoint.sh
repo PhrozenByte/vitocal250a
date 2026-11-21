@@ -14,6 +14,12 @@ set -e
 
 [ $# -gt 0 ] || set -- vitocal250a-monitor
 if [ "$1" == "vitocal250a-monitor" ]; then
+    # copy default 'fields.toml' to state dir if file doesn't exist yet
+    if [ ! -e "/var/local/vitocal250a/fields.toml" ]; then
+        cp "/usr/local/share/vitocal250a/fields.toml" "/var/local/vitocal250a/fields.toml"
+        chown vitocal250a:vitocal250a "/var/local/vitocal250a/fields.toml"
+    fi
+
     # run vitocal250a-monitor unprivileged and with respawn.py
     # respawn after 1, ~4, ~13, ~49, ~179, ~654, and then every 900 seconds,
     # totalling 15 min by the 5th, 60 min by the 8th, and 6 hours by the 28th retry
