@@ -27,6 +27,8 @@ from PyViCare.PyViCareUtils import PyViCareNotSupportedFeatureError
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
+from vitocal250a.utils import VALUE_TYPES, AnyValueType
+
 
 def init_vicare(
     client_id: str, token_file: str
@@ -88,7 +90,7 @@ class Value:
     key: str
     name: str
 
-    value_type: type = field(default=float, repr=False, kw_only=True)
+    value_type: AnyValueType = field(default=VALUE_TYPES["float"], repr=False, kw_only=True)
     unit: str = field(default="", repr=False, kw_only=True)
     hidden: bool = field(default=False, repr=False, kw_only=True)
 
@@ -118,16 +120,7 @@ class Value:
             or abs(timestamp.timestamp() - self.timestamp.timestamp()) >= 1
         )
 
-        if value is not None and not isinstance(value, self.value_type):
-            try:
-                value = self.value_type(value)
-            except Exception as exc:
-                raise ValueError(
-                    f"Invalid value: Expected a value convertible to "
-                    f"{self.value_type.__name__}, got {value!r}"
-                ) from exc
-
-        self.value = value
+        self.value = self.value_type.cast(value)
         self.timestamp = timestamp
         self.updated = updated
         return value, timestamp, updated
@@ -157,7 +150,7 @@ class FeatureValue(Value):
 
 @dataclass
 class FetchTimeValue(Value):
-    value_type: type[str] = field(default=str, repr=False, kw_only=True)
+    value_type: AnyValueType = field(default=VALUE_TYPES["str"], repr=False, kw_only=True)
     unit: str = field(default="+00:00", repr=False, kw_only=True)
 
     def _fetch_data(self) -> tuple[object, datetime]:
@@ -168,7 +161,7 @@ class FetchTimeValue(Value):
 
 @dataclass
 class ApiRequestValue(Value):
-    value_type: type[bool] = field(default=bool, repr=False, kw_only=True)
+    value_type: AnyValueType = field(default=VALUE_TYPES["bool"], repr=False, kw_only=True)
     hidden: bool = field(default=True, repr=False, kw_only=True)
 
     def _fetch_data(self) -> tuple[object, datetime]:
@@ -178,7 +171,7 @@ class ApiRequestValue(Value):
 
 @dataclass
 class OnOffStatusValue(FeatureValue):
-    value_type: type[bool] = field(default=bool, repr=False, kw_only=True)
+    value_type: AnyValueType = field(default=VALUE_TYPES["bool"], repr=False, kw_only=True)
 
     property_name: str = field(default="status", init=False, repr=False)
 
@@ -189,7 +182,7 @@ class OnOffStatusValue(FeatureValue):
 
 @dataclass
 class TargetTemperatureValue(Value):
-    value_type: type[int] = field(default=int, repr=False, kw_only=True)
+    value_type: AnyValueType = field(default=VALUE_TYPES["int"], repr=False, kw_only=True)
 
     circuit: HeatingCircuit = field(init=False, repr=False)
 
@@ -321,13 +314,4 @@ VALUE_CLASSES: dict[str, type[Value]] = {
     "on_off_status": OnOffStatusValue,
     "api_request": ApiRequestValue,
     "fetch_time": FetchTimeValue,
-}
-
-
-VALUE_TYPES: dict[str, type] = {
-    "bool": bool,
-    "int": int,
-    "float": float,
-    "str": str,
-    "datetime": datetime,
 }

@@ -20,11 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from time import sleep
 from types import FrameType
-from typing import TextIO
+from typing import TextIO, cast
 
 from file_read_backwards import FileReadBackwards
 
 from vitocal250a.api_fetcher import get_features, init_vicare
+from vitocal250a.utils import ValueType
 
 
 def _format_timestamp(timestamp: datetime, reference: datetime) -> str:
@@ -146,12 +147,14 @@ def run_monitor() -> None:
                 fetch_time = service.cache_time.astimezone()
 
                 # collect data
-                data: list[tuple[str, str, object, datetime, bool, type, str, bool]] = [
+                data: list[
+                    tuple[str, str, object, datetime, bool, ValueType[object], str, bool]
+                ] = [
                     (
                         feature.key,
                         feature.name,
                         *feature.fetch_data(),
-                        feature.value_type,
+                        cast(ValueType[object], feature.value_type),
                         feature.unit,
                         feature.hidden,
                     )
@@ -167,20 +170,17 @@ def run_monitor() -> None:
                         csv_writer.writeheader()
                         csv_writer.writerow({key: name for key, name, _, _, _, _, _, _ in data})
                         csv_writer.writerow(
-                            {
-                                key: value_type.__name__
-                                for key, _, _, _, _, value_type, _, _ in data
-                            }
+                            {key: str(value_type) for key, _, _, _, _, value_type, _, _ in data}
                         )
                         csv_writer.writerow({key: unit for key, _, _, _, _, _, unit, _ in data})
                         csv_file_empty = False
 
                     # write data rows
                     rows: dict[datetime, dict[str, object]] = {}
-                    for key, _, value, timestamp, updated, _, _, _ in data:
+                    for key, _, value, timestamp, updated, value_type, _, _ in data:
                         if updated and key != "fetch_time":
                             timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
-                            rows.setdefault(timestamp, {})[key] = value
+                            rows.setdefault(timestamp, {})[key] = value_type.to_str(value)
 
                     for timestamp, values in sorted(rows.items()):
                         csv_writer.writerow(
@@ -199,18 +199,18 @@ def run_monitor() -> None:
                         len(name) for _, name, _, _, _, _, _, hidden in data if not hidden
                     )
                     width_value = max(
-                        len(str(value)) + len(unit)
-                        for _, _, value, _, _, _, unit, hidden in data
+                        len(value_type.to_str(value)) + len(unit)
+                        for _, _, value, _, _, value_type, unit, hidden in data
                         if not hidden
                     )
-                    for key, name, value, timestamp, updated, _, unit, hidden in data:
+                    for key, name, value, timestamp, updated, value_type, unit, hidden in data:
                         if hidden:
                             continue
                         if key == "fetch_time":
                             value = timestamp.strftime("%Y-%m-%d %H:%M:%S")
                             unit = timestamp.strftime("%:z")[:6]
 
-                        print_value = f"{value}{unit}"
+                        print_value = f"{value_type.to_str(value)}{unit}"
                         print_timestamp = _format_timestamp(timestamp, fetch_time)
                         status = (
                             f"{name:<{width_name}}  "
