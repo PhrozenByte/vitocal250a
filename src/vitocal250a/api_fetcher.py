@@ -110,6 +110,11 @@ class Value:
             )
         self.service = service
 
+    def set_data(self, value: object, timestamp: datetime, updated: bool = True) -> None:
+        self.value = self.value_type.cast(value)
+        self.timestamp = timestamp
+        self.updated = updated
+
     def _fetch_data(self) -> tuple[object, datetime]:
         raise NotImplementedError
 
@@ -120,9 +125,7 @@ class Value:
             or abs(timestamp.timestamp() - self.timestamp.timestamp()) >= 1
         )
 
-        self.value = self.value_type.cast(value)
-        self.timestamp = timestamp
-        self.updated = updated
+        self.set_data(value, timestamp, updated)
         return value, timestamp, updated
 
 

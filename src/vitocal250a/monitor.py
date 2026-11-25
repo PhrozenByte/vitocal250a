@@ -142,23 +142,25 @@ def run_monitor() -> None:
                         csv_reader_io, fieldnames=feature_keys, delimiter=";"
                     )
                     for row in csv_reader:
-                        if (
-                            len(init_features) == 0
-                            or row["fetch_time"] == "fetch_time"
-                            or row["fetch_time"] == features["fetch_time"].name
-                            or row["fetch_time"] == features["fetch_time"].unit
-                        ):
+                        if len(init_features) == 0:
                             break
 
-                        fetch_time = datetime.fromisoformat(row["fetch_time"])
+                        try:
+                            fetch_time = datetime.fromisoformat(row["fetch_time"])
+                        except ValueError:
+                            # the `fetch_time` datetime string is invalid
+                            # we have likely reached the header rows, even though `len(init_features) == 0` should
+                            # normally cause the loop to break first, since we always write a complete dataset;
+                            # since we don't consider writing duplicate data an issue, we ignore this no matter what
+                            break
+
                         if fetch_time.tzinfo is None:
                             fetch_time = fetch_time.replace(tzinfo=UTC)
                         fetch_time = fetch_time.astimezone()
 
                         for key, value in row.items():
                             if value and key in init_features:
-                                features[key].value = value
-                                features[key].timestamp = fetch_time
+                                features[key].set_data(value, fetch_time)
                                 init_features.remove(key)
 
             # prepare CSV writer
