@@ -25,7 +25,7 @@ from typing import TextIO, cast
 from file_read_backwards import FileReadBackwards
 
 from vitocal250a.api_fetcher import get_features, init_vicare
-from vitocal250a.utils import ValueType
+from vitocal250a.utils import FileLock, LockFile, ValueType
 
 
 def _format_timestamp(timestamp: datetime, reference: datetime) -> str:
@@ -93,16 +93,36 @@ def run_monitor() -> None:
         # initialize CSV file
         csv_file: TextIO | None = None
         csv_file_empty = True
+        csv_lock: FileLock | None = None
         csv_writer: DictWriter[str] | None = None
 
         if args.csv_file:
             csv_file_path = Path(args.csv_file)
             csv_file_empty = not csv_file_path.exists() or csv_file_path.stat().st_size == 0
 
+            # create, acquire and permanently hold exclusive lock on a separate lock file
+            # this lock ensures permanent exclusive write access of this monitor
+            stack.enter_context(
+                LockFile(csv_file_path.with_name(f".{csv_file_path.name}.lock"))
+            )
+
+            # open CSV file in append mode
+            csv_file = stack.enter_context(
+                csv_file_path.open("a", newline="", encoding="utf-8")
+            )
+
+            # prepare an exclusive lock on the CSV file
+            # don't acquire that lock right away, only when actually writing to the file,
+            # or when initially reading from a pre-existing file
+            csv_lock = FileLock(csv_file)
+
             # read existing CSV file
             if not csv_file_empty:
                 # verify that the field names of the CSV file match
-                with csv_file_path.open("r", newline="", encoding="utf-8") as csv_reader_io:
+                with (
+                    csv_file_path.open("r", newline="", encoding="utf-8") as csv_reader_io,
+                    csv_lock,
+                ):
                     csv_reader = csv.DictReader(csv_reader_io, delimiter=";")
                     if csv_reader.fieldnames != feature_keys:
                         raise ValueError(
@@ -114,7 +134,10 @@ def run_monitor() -> None:
                 init_features: set[str] = set(features.keys())
                 init_features.remove("fetch_time")
 
-                with FileReadBackwards(csv_file_path, encoding="utf-8") as csv_reader_io:
+                with (
+                    FileReadBackwards(csv_file_path, encoding="utf-8") as csv_reader_io,
+                    csv_lock,
+                ):
                     csv_reader = csv.DictReader(
                         csv_reader_io, fieldnames=feature_keys, delimiter=";"
                     )
@@ -137,11 +160,6 @@ def run_monitor() -> None:
                                 features[key].value = value
                                 features[key].timestamp = fetch_time
                                 init_features.remove(key)
-
-            # open CSV file in append mode
-            csv_file = stack.enter_context(
-                csv_file_path.open("a", newline="", encoding="utf-8")
-            )
 
             # prepare CSV writer
             csv_writer = csv.DictWriter(csv_file, fieldnames=feature_keys, delimiter=";")
@@ -169,33 +187,36 @@ def run_monitor() -> None:
             ]
 
             # write to CSV file
+            # acquire an exclusive lock on the CSV file while writing
             if csv_file is not None:
                 assert csv_writer is not None
+                assert csv_lock is not None
 
-                # write header rows
-                if csv_file_empty:
-                    csv_writer.writeheader()
-                    csv_writer.writerow({key: name for key, name, _, _, _, _, _, _ in data})
-                    csv_writer.writerow(
-                        {key: str(value_type) for key, _, _, _, _, value_type, _, _ in data}
-                    )
-                    csv_writer.writerow({key: unit for key, _, _, _, _, _, unit, _ in data})
-                    csv_file_empty = False
+                with csv_lock:
+                    # write header rows
+                    if csv_file_empty:
+                        csv_writer.writeheader()
+                        csv_writer.writerow({key: name for key, name, _, _, _, _, _, _ in data})
+                        csv_writer.writerow(
+                            {key: str(value_type) for key, _, _, _, _, value_type, _, _ in data}
+                        )
+                        csv_writer.writerow({key: unit for key, _, _, _, _, _, unit, _ in data})
+                        csv_file_empty = False
 
-                # write data rows
-                rows: dict[datetime, dict[str, object]] = {}
-                for key, _, value, timestamp, updated, value_type, _, _ in data:
-                    if updated and key != "fetch_time":
-                        timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
-                        rows.setdefault(timestamp, {})[key] = value_type.to_str(value)
+                    # write data rows
+                    rows: dict[datetime, dict[str, object]] = {}
+                    for key, _, value, timestamp, updated, value_type, _, _ in data:
+                        if updated and key != "fetch_time":
+                            timestamp = timestamp.astimezone(UTC).replace(microsecond=0)
+                            rows.setdefault(timestamp, {})[key] = value_type.to_str(value)
 
-                for timestamp, values in sorted(rows.items()):
-                    csv_writer.writerow(
-                        {"fetch_time": timestamp.strftime("%Y-%m-%d %H:%M:%S"), **values}
-                    )
+                    for timestamp, values in sorted(rows.items()):
+                        csv_writer.writerow(
+                            {"fetch_time": timestamp.strftime("%Y-%m-%d %H:%M:%S"), **values}
+                        )
 
-                # flush CSV file
-                csv_file.flush()
+                    # flush CSV file
+                    csv_file.flush()
 
             # write to status file and/or stdout
             if status_file is not None:

@@ -10,7 +10,79 @@
 # License-Filename: LICENSE
 
 from datetime import datetime
-from typing import Mapping, Union
+from fcntl import LOCK_EX, LOCK_SH, LOCK_UN, flock
+from pathlib import Path
+from types import TracebackType
+from typing import Mapping, Self, TextIO, Type, Union
+
+
+class FileLock:
+    _file_handle: TextIO | None = None
+    _lock_type: int = LOCK_EX
+
+    _acquired: bool = False
+
+    @property
+    def acquired(self) -> bool:
+        return self._acquired
+
+    def __init__(self, file_handle: TextIO, exclusive: bool = True) -> None:
+        self._file_handle = file_handle
+        self._lock_type = LOCK_EX if exclusive else LOCK_SH
+
+    def acquire(self) -> None:
+        if not self._acquired:
+            assert self._file_handle is not None
+            flock(self._file_handle, self._lock_type)
+            self._acquired = True
+
+    def release(self) -> None:
+        if self._acquired:
+            assert self._file_handle is not None
+            flock(self._file_handle, LOCK_UN)
+            self._acquired = False
+
+    def __enter__(self) -> Self:
+        self.acquire()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        self.release()
+
+
+class LockFile(FileLock):
+    _file_path: Path
+
+    def __init__(self, file_path: Path, exclusive: bool = True) -> None:
+        self._file_path = file_path
+        self._lock_type = LOCK_EX if exclusive else LOCK_SH
+
+    def _open(self) -> None:
+        if self._file_handle is None:
+            self._file_handle = self._file_path.open("w")
+
+    def _close(self) -> None:
+        if self._file_handle is not None:
+            self._file_handle.close()
+            self._file_path.unlink()
+
+    def acquire(self) -> None:
+        self._open()
+        super().acquire()
+
+    def __exit__(
+        self,
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        super().__exit__(exc_type, exc_val, exc_tb)
+        self._close()
 
 
 class ValueType[BaseType]:
