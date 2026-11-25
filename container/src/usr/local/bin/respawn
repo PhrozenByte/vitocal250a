@@ -36,7 +36,7 @@ def main() -> None:
     global _process
 
     for signum in signal.valid_signals():
-        if signum not in (SIGKILL, SIGSTOP):
+        if signum not in {SIGKILL, SIGSTOP}:
             signal.signal(signum, _handle_signal)
 
     # initialize CLI

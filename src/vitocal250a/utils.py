@@ -40,7 +40,7 @@ class BoolValueType(ValueType[bool]):
     value_type: type[bool] = bool
 
     def from_str(self, value: str) -> bool:
-        if value in ["True", "False", ""]:
+        if value in {"True", "False", ""}:
             return value == "True"
         raise ValueError(f"Failed to cast {value!r} to {self}")
 
@@ -86,9 +86,12 @@ AnyValueType = Union[
 
 
 VALUE_TYPES: Mapping[str, AnyValueType] = {
-    "bool": BoolValueType(),
-    "int": IntValueType(),
-    "float": FloatValueType(),
-    "str": StringValueType(),
-    "datetime": DatetimeValueType(),
+    str(value_type): value_type
+    for value_type in (
+        BoolValueType(),
+        IntValueType(),
+        FloatValueType(),
+        StringValueType(),
+        DatetimeValueType(),
+    )
 }

@@ -12,7 +12,7 @@
 import io
 from pathlib import Path
 from types import TracebackType
-from typing import Iterator, Optional, Type, Self
+from typing import Iterator, Type, Self
 
 
 class FileReadBackwards:
@@ -29,10 +29,10 @@ class FileReadBackwards:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType]
-    ) -> Optional[bool]: ...
+        exc_type: Type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None: ...
 
     def __next__(self) -> str: ...
 
