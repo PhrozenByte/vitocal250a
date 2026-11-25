@@ -160,7 +160,7 @@ def run_monitor() -> None:
 
                         for key, value in row.items():
                             if value and key in init_features:
-                                features[key].set_data(value, fetch_time)
+                                features[key].set(value, fetch_time)
                                 init_features.remove(key)
 
             # prepare CSV writer
@@ -180,7 +180,7 @@ def run_monitor() -> None:
                 (
                     feature.key,
                     feature.name,
-                    *feature.fetch_data(),
+                    *feature.fetch(),
                     cast(ValueType[object], feature.value_type),
                     feature.unit,
                     feature.hidden,

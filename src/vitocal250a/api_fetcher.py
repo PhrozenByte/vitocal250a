@@ -110,22 +110,22 @@ class Value:
             )
         self.service = service
 
-    def set_data(self, value: object, timestamp: datetime, updated: bool = True) -> None:
+    def set(self, value: object, timestamp: datetime, updated: bool = True) -> None:
         self.value = self.value_type.cast(value)
         self.timestamp = timestamp
         self.updated = updated
 
-    def _fetch_data(self) -> tuple[object, datetime]:
+    def _fetch(self) -> tuple[object, datetime]:
         raise NotImplementedError
 
-    def fetch_data(self) -> tuple[object, datetime, bool]:
-        value, timestamp = self._fetch_data()
+    def fetch(self) -> tuple[object, datetime, bool]:
+        value, timestamp = self._fetch()
         updated = (
             self.timestamp is None
             or abs(timestamp.timestamp() - self.timestamp.timestamp()) >= 1
         )
 
-        self.set_data(value, timestamp, updated)
+        self.set(value, timestamp, updated)
         return value, timestamp, updated
 
 
@@ -144,7 +144,7 @@ class FeatureValue(Value):
         else:
             self.feature_name = self.key
 
-    def _fetch_data(self) -> tuple[object, datetime]:
+    def _fetch(self) -> tuple[object, datetime]:
         data = self.heatpump.getProperty(self.feature_name)
         value = data["properties"][self.property_name]["value"]
         timestamp = datetime.fromisoformat(data["timestamp"]).astimezone()
@@ -156,7 +156,7 @@ class FetchTimeValue(Value):
     value_type: AnyValueType = field(default=VALUE_TYPES["str"], repr=False, kw_only=True)
     unit: str = field(default="+00:00", repr=False, kw_only=True)
 
-    def _fetch_data(self) -> tuple[object, datetime]:
+    def _fetch(self) -> tuple[object, datetime]:
         timestamp = self.service.cache_time.astimezone()
         value = timestamp.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
         return value, timestamp
@@ -167,7 +167,7 @@ class ApiRequestValue(Value):
     value_type: AnyValueType = field(default=VALUE_TYPES["bool"], repr=False, kw_only=True)
     hidden: bool = field(default=True, repr=False, kw_only=True)
 
-    def _fetch_data(self) -> tuple[object, datetime]:
+    def _fetch(self) -> tuple[object, datetime]:
         timestamp = self.service.cache_time.astimezone()
         return True, timestamp
 
@@ -178,8 +178,8 @@ class OnOffStatusValue(FeatureValue):
 
     property_name: str = field(default="status", init=False, repr=False)
 
-    def _fetch_data(self) -> tuple[object, datetime]:
-        value, timestamp = super()._fetch_data()
+    def _fetch(self) -> tuple[object, datetime]:
+        value, timestamp = super()._fetch()
         return value == "on", timestamp
 
 
@@ -200,7 +200,7 @@ class TargetTemperatureValue(Value):
             )
         self.circuit = self.heatpump.getCircuit(match[1])  # type: ignore[no-untyped-call]
 
-    def _fetch_data(self) -> tuple[object, datetime]:
+    def _fetch(self) -> tuple[object, datetime]:
         active_program_data = self.circuit.getProperty(
             f"heating.circuits.{self.circuit.id}.operating.programs.active"
         )
